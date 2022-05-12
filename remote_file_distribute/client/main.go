@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	addr := flag.String("addr", "localhost:8080", "url is required")
+	addr := flag.String("addr", "localhost:8081", "url is required")
 	flag.Parse()
 	/*
 		resp, err := http.Get(*url)
@@ -33,10 +33,10 @@ func main() {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	uri := url.URL{Scheme: "ws", Host: *addr, Path: "/"}
+	uri := url.URL{Scheme: "ws", Host: *addr, Path: "/rfd"}
 	c, _, err := websocket.DefaultDialer.Dial(uri.String(), nil)
 	if err != nil {
-		log.Fatal("dial: ", err)
+		log.Fatalln("Failed to connect with WebSocket!", err)
 	}
 	defer c.Close()
 
@@ -46,7 +46,7 @@ func main() {
 		for {
 			_, message, err := c.ReadMessage()
 			if err != nil {
-				log.Println("read error: ", err)
+				log.Fatalln("Failed to read from WebSocket!", err)
 				return
 			}
 			log.Printf("recv: %s", message)
@@ -56,24 +56,30 @@ func main() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	for {
+	b := true
+
+	for i := 0; i < 10; i++ {
 		select {
 		case <-done:
 			return
-		case t := <-ticker.C:
-			err := c.WriteMessage(websocket.TextMessage, []byte("TIME: "+t.String()))
+		case <-ticker.C:
+			b = !b
+			if b {
+				err = c.WriteMessage(websocket.TextMessage, []byte("PT"))
+			} else {
+				err = c.WriteMessage(websocket.TextMessage, []byte("ST"))
+			}
 			if err != nil {
-				log.Println("write: ", err)
-				return
+				log.Fatalln("Failed to write to WebSocket!", err)
 			}
 		case <-interrupt:
-			log.Println("interrupt")
-
-			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			err = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
-				log.Println("write close: ", err)
-				return
+				log.Fatalln("Failed to gracefully close WebSocket!", err)
 			}
+
+			// hold off on returning out of the loop until the websocket is closed
+			// gracefully or we receive a terminate interrupt from the OS
 			select {
 			case <-done:
 			case <-time.After(time.Second):
