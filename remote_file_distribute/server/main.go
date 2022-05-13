@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
@@ -46,10 +47,15 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.Close()
 
+	// buffer := make([]byte, 4096)
+	var data []byte
+
 	for {
 		mt, message, err := c.ReadMessage()
 		if err != nil {
-			log.Println("Failed to read from WebSocket!", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Println("Failed to read from WebSocket!", err)
+			}
 			return
 		}
 
@@ -57,8 +63,16 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 		command := string(message[0:2])
 
 		switch command {
-		case "PT":
-			err = c.WriteMessage(mt, []byte("PUT MESSAGE RECEIVED"))
+		case "SZ":
+			size := binary.BigEndian.Uint64(message[2:])
+			data = make([]byte, size)
+			err = c.WriteMessage(mt, []byte(fmt.Sprintf("SZ: %d", len(data))))
+		case "CH":
+			offset := binary.BigEndian.Uint64(message[2:10])
+			size := binary.BigEndian.Uint32(message[10:14])
+			err = c.WriteMessage(mt, []byte(fmt.Sprintf("CH: %d, %d", offset, size)))
+		case "DI":
+			err = c.WriteMessage(mt, []byte(""))
 		case "ST":
 			err = c.WriteMessage(mt, []byte("STATUS MESSAGE RECEIVED"))
 		default:

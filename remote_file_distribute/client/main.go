@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"log"
 	"net/url"
@@ -38,6 +39,7 @@ func main() {
 	if err != nil {
 		log.Fatalln("Failed to connect with WebSocket!", err)
 	}
+
 	defer c.Close()
 
 	done := make(chan struct{})
@@ -46,7 +48,9 @@ func main() {
 		for {
 			_, message, err := c.ReadMessage()
 			if err != nil {
-				log.Fatalln("Failed to read from WebSocket!", err)
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					log.Println("Failed to read from WebSocket!", err)
+				}
 				return
 			}
 			log.Printf("recv: %s", message)
@@ -56,35 +60,68 @@ func main() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	b := true
+	// first send the size of the data to be transferred
+	// so that the server can allocate the space needed to store it
+	buffer := make([]byte, 10)
+	buffer[0] = 'S'
+	buffer[1] = 'Z'
+	binary.BigEndian.PutUint64(buffer[2:], 12345)
+	err = c.WriteMessage(websocket.BinaryMessage, buffer)
+	if err != nil {
+		log.Fatalln("Failed to write buffer size to web socket!", err)
+	}
 
+	// send the chunks
+	buffer = make([]byte, 4096+14)
 	for i := 0; i < 10; i++ {
-		select {
-		case <-done:
-			return
-		case <-ticker.C:
-			b = !b
-			if b {
-				err = c.WriteMessage(websocket.TextMessage, []byte("PT"))
-			} else {
-				err = c.WriteMessage(websocket.TextMessage, []byte("ST"))
-			}
-			if err != nil {
-				log.Fatalln("Failed to write to WebSocket!", err)
-			}
-		case <-interrupt:
-			err = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-			if err != nil {
-				log.Fatalln("Failed to gracefully close WebSocket!", err)
-			}
-
-			// hold off on returning out of the loop until the websocket is closed
-			// gracefully or we receive a terminate interrupt from the OS
-			select {
-			case <-done:
-			case <-time.After(time.Second):
-			}
-			return
+		buffer[0] = 'C'
+		buffer[1] = 'H'
+		binary.BigEndian.PutUint64(buffer[2:], uint64(i))    // offset
+		binary.BigEndian.PutUint32(buffer[10:], uint32(i*2)) // size
+		err = c.WriteMessage(websocket.BinaryMessage, buffer)
+		if err != nil {
+			log.Fatalln("Failed to write buffer size to web socket!", err)
 		}
+	}
+
+	err = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	if err != nil {
+		log.Fatalln("Failed to gracefully close WebSocket!", err)
+	}
+
+	<-done
+
+	// for {
+	// 	select {
+	// 	case <-done:
+	// 		return
+	// 	// case <-ticker.C:
+	// 	// 	b = !b
+	// 	// 	if b {
+	// 	// 		err = c.WriteMessage(websocket.TextMessage, []byte("PT"))
+	// 	// 	} else {
+	// 	// 		err = c.WriteMessage(websocket.TextMessage, []byte("ST"))
+	// 	// 	}
+	// 	// 	if err != nil {
+	// 	// 		log.Fatalln("Failed to write to WebSocket!", err)
+	// 	// 	}
+	// 	case <-interrupt:
+	// 		closeConnection(c, &done)
+	// 		return
+	// 	}
+	// }
+}
+
+func closeConnection(conn *websocket.Conn, done *chan struct{}) {
+	err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	if err != nil {
+		log.Fatalln("Failed to gracefully close WebSocket!", err)
+	}
+
+	// hold off on returning out of the loop until the websocket is closed
+	// gracefully or we receive a terminate interrupt from the OS
+	select {
+	case <-*done:
+	case <-time.After(time.Second):
 	}
 }
