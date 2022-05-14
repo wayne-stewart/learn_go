@@ -16,7 +16,7 @@ var upgrader = websocket.Upgrader{}
 
 func main() {
 
-	addr := flag.String("addr", "localhost:8081", "http service address")
+	listen_addr := flag.String("listen_addr", "localhost:8081", "http service address")
 	flag.Parse()
 
 	is_service, err := svc.IsWindowsService()
@@ -36,7 +36,7 @@ func main() {
 		fmt.Fprintln(w, "Hello, friend. Who are you?")
 	})
 
-	log.Fatal(http.ListenAndServe(*addr, nil))
+	log.Fatal(http.ListenAndServe(*listen_addr, nil))
 }
 
 func handle_rfd(w http.ResponseWriter, r *http.Request) {
