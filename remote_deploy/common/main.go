@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 )
 
+const DATA_DONE = "DATA_DONE"
+const META_BAR = "META|"
+
 const KB float64 = 1024
 const MB float64 = KB * KB
 const GB float64 = MB * KB
@@ -30,8 +33,12 @@ func FormatBytes(x int) string {
 	}
 }
 
-func Progress(count int, total int, message string, pad_right int) {
-	fmt.Printf("\r[%d/%d] %.2f%% %-*s", count, total, 100.0*float64(count)/float64(total), pad_right, message)
+func ProgressBytes(count int, total int, message string, pad_right int) {
+	fmt.Printf("\r[%.0f%%] %s %-*s", 100.0*float64(count)/float64(total), FormatBytes(count), pad_right, message)
+}
+
+func ProgressEach(count int, total int, message string, pad_right int) {
+	fmt.Printf("\r[%.0f%%] %d/%d %-*s", 100.0*float64(count)/float64(total), count, total, pad_right, message)
 }
 
 type ProgressFunc func(count int, total int, message string, pad_right int)
@@ -53,18 +60,17 @@ func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count 
 	pad_right := 0
 
 	fmt.Println("counting files in", src)
+	l1 := len("compressing: ")
 	filepath.Walk(src, func(file string, info os.FileInfo, err error) error {
 		total++
-		l := len(filepath.ToSlash(file[len(src):]))
+		l := l1 + len(filepath.ToSlash(file[len(src):]))
 		if l > pad_right {
 			pad_right = l
 		}
 		return nil
 	})
 
-	fmt.Println("compressing...")
 	if err := filepath.Walk(src, func(file string, info os.FileInfo, err error) error {
-		count++
 		if err != nil {
 			return err
 		}
@@ -77,7 +83,8 @@ func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count 
 		if len(header.Name) == 0 {
 			header.Name = "ROOT"
 		}
-		progress(count, total, header.Name, pad_right)
+		progress(count, total, "compressing: "+header.Name, pad_right)
+		count++
 
 		if err := tar_writer.WriteHeader(header); err != nil {
 			return err
@@ -98,6 +105,7 @@ func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count 
 		fmt.Println()
 		return 0, err
 	}
+	progress(total, total, "compression complete", pad_right)
 	fmt.Println()
 
 	if err := tar_writer.Close(); err != nil {

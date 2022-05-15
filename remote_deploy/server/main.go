@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
@@ -50,8 +49,7 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 	}
 	defer c.Close()
 
-	// buffer := make([]byte, 4096)
-	var data []byte
+	buffer := bytes.NewBuffer(make([]byte, 0, 10*1024*1024))
 
 	for {
 		mt, message, err := c.ReadMessage()
@@ -65,19 +63,20 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 		/* the command will be the first 2 characters of the message */
 		command := string(message[0:2])
 
-		switch command {
-		case "SZ":
-			size := binary.BigEndian.Uint64(message[2:])
-			data = make([]byte, size)
-			err = c.WriteMessage(mt, []byte(fmt.Sprintf("SZ: %d", len(data))))
-		case "CH":
-			offset := binary.BigEndian.Uint64(message[2:10])
-			size := binary.BigEndian.Uint32(message[10:14])
-			err = c.WriteMessage(mt, []byte(fmt.Sprintf("CH: %d, %d", offset, size)))
-		case "DI":
-			err = c.WriteMessage(mt, []byte(""))
-		case "ST":
-			err = c.WriteMessage(mt, []byte("STATUS MESSAGE RECEIVED"))
+		switch {
+		case mt == websocket.TextMessage && string(message[0:5]) == common.META_BAR:
+			log.Println("meta data received")
+			// size := binary.BigEndian.Uint64(message[2:])
+			// data = make([]byte, size)
+			// err = c.WriteMessage(mt, []byte(fmt.Sprintf("SZ: %d", len(data))))
+		case mt == websocket.TextMessage && string(message) == common.DATA_DONE:
+			log.Println("data received")
+		case mt == websocket.BinaryMessage:
+			buffer.Write(message)
+			//log.Println("data received")
+			// offset := binary.BigEndian.Uint64(message[2:10])
+			// size := binary.BigEndian.Uint32(message[10:14])
+			// err = c.WriteMessage(mt, []byte(fmt.Sprintf("CH: %d, %d", offset, size)))
 		default:
 			_ = c.WriteMessage(mt, []byte("UNKNOWN COMMAND: "+command))
 			return
@@ -90,7 +89,7 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func copy_deploy(compress_buffer []byte, destinations []string) error {
+func decompress_deploy(compress_buffer []byte, destinations []string) error {
 	for i := 0; i < len(destinations); i++ {
 		reader := bytes.NewReader(compress_buffer)
 		if err := common.Uncompress(reader, destinations[i]); err != nil {

@@ -2,13 +2,13 @@ package main
 
 import (
 	"bytes"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -40,93 +40,59 @@ func main() {
 	}
 	validate_dir_exists(*src)
 
-	cancel_interrupt := make(chan os.Signal, 1)
-	signal.Notify(cancel_interrupt, os.Interrupt)
+	remote_message_chan := make(chan struct{})
+
+	interrupt_chan := make(chan os.Signal, 1)
+	signal.Notify(interrupt_chan, os.Interrupt)
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	count := 0
-	total := 5
+	/*
+			count := 0
+			total := 5
 
-	for {
-		select {
-		case <-cancel_interrupt:
-			fmt.Print("\nOperation Cancelled\n")
-			return
-		case <-ticker.C:
-			count++
-			fmt.Printf("\r[%d/%d] discovering files", count, total)
-			if count >= total {
-				fmt.Println()
-				goto PROGRESS_END
+			for {
+				select {
+				case <-interrupt_chan:
+					fmt.Print("\nOperation Cancelled\n")
+					return
+				case <-ticker.C:
+					count++
+					fmt.Printf("\r[%d/%d] discovering files", count, total)
+					if count >= total {
+						fmt.Println()
+						goto PROGRESS_END
+					}
+				}
 			}
-		}
-	}
-PROGRESS_END:
-
+		PROGRESS_END:
+	*/
 	compress_buffer := bytes.NewBuffer(make([]byte, 0, 1024*1024))
-	_, err := common.Compress(*src, compress_buffer, common.Progress)
+	compress_count, err := common.Compress(*src, compress_buffer, common.ProgressEach)
 
-	return
-
+	// initialize websocket connection
 	uri := url.URL{Scheme: "ws", Host: *addr, Path: "/rfd"}
-	c, _, err := websocket.DefaultDialer.Dial(uri.String(), nil)
+	websocket_conn, _, err := websocket.DefaultDialer.Dial(uri.String(), nil)
 	if err != nil {
 		log.Fatalln("Failed to connect with WebSocket!", err)
 	}
+	defer websocket_conn.Close()
 
-	defer c.Close()
+	go remoteMessageLoop(websocket_conn, &remote_message_chan)
 
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			_, message, err := c.ReadMessage()
-			if err != nil {
-				if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-					log.Println("Failed to read from WebSocket!", err)
-				}
-				return
-			}
-			log.Printf("recv: %s", message)
-		}
-	}()
+	sendMetaData(websocket_conn, compress_buffer.Len(), compress_count, destinations)
 
-	// first send the size of the data to be transferred
-	// so that the server can allocate the space needed to store it
-	buffer := make([]byte, 10)
-	buffer[0] = 'S'
-	buffer[1] = 'Z'
-	binary.BigEndian.PutUint64(buffer[2:], 12345)
-	err = c.WriteMessage(websocket.BinaryMessage, buffer)
-	if err != nil {
-		log.Fatalln("Failed to write buffer size to web socket!", err)
-	}
+	sendData(websocket_conn, compress_buffer)
 
-	// send the chunks
-	buffer = make([]byte, 4096+14)
-	for i := 0; i < 10; i++ {
-		buffer[0] = 'C'
-		buffer[1] = 'H'
-		binary.BigEndian.PutUint64(buffer[2:], uint64(i))    // offset
-		binary.BigEndian.PutUint32(buffer[10:], uint32(i*2)) // size
-		err = c.WriteMessage(websocket.BinaryMessage, buffer)
-		if err != nil {
-			log.Fatalln("Failed to write buffer size to web socket!", err)
-		}
-	}
+	closeConnection(websocket_conn, &remote_message_chan)
 
-	err = c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	if err != nil {
-		log.Fatalln("Failed to gracefully close WebSocket!", err)
-	}
-
-	<-done
+	// waits until remote message chan is triggered/closed
+	<-remote_message_chan
 
 	// for {
 	// 	select {
-	// 	case <-done:
+	// 	case <-progress_done:
 	// 		return
 	// 	// case <-ticker.C:
 	// 	// 	b = !b
@@ -138,14 +104,60 @@ PROGRESS_END:
 	// 	// 	if err != nil {
 	// 	// 		log.Fatalln("Failed to write to WebSocket!", err)
 	// 	// 	}
-	// 	case <-interrupt:
-	// 		closeConnection(c, &done)
+	// 	case <-interrupt_chan:
+	// 		closeConnection(websocket_conn, &progress_done)
 	// 		return
 	// 	}
 	// }
 }
 
-func closeConnection(conn *websocket.Conn, done *chan struct{}) {
+func sendMetaData(conn *websocket.Conn, byte_size int, item_count int, destinations Destinations) {
+	buffer := bytes.NewBuffer(make([]byte, 0, 1024))
+	buffer.WriteString(common.META_BAR)
+	buffer.WriteString(fmt.Sprintf("%d|%d|", byte_size, item_count))
+	buffer.WriteString(strings.Join(destinations, ","))
+	err := conn.WriteMessage(websocket.TextMessage, buffer.Bytes())
+	if err != nil {
+		log.Fatalln("Failed to write meta data to web socket!", err)
+	}
+}
+
+func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
+	data := buffer.Bytes()
+	chunk_size := 4096
+	for low := 0; low < len(data); {
+		common.ProgressBytes(low, len(data), "sending data", 20)
+		high := low + chunk_size
+		if high > len(data) {
+			high = len(data)
+		}
+		err := conn.WriteMessage(websocket.BinaryMessage, data[low:high])
+		if err != nil {
+			fmt.Println()
+			log.Fatalln("Failed to write data to the web socket!", err)
+		}
+		low = high
+	}
+	common.ProgressBytes(len(data), len(data), "all data sent", 0)
+	fmt.Println()
+	conn.WriteMessage(websocket.TextMessage, []byte(common.DATA_DONE))
+}
+
+func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{}) {
+	defer close(*remote_message_chan)
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Println("Failed to read from WebSocket!", err)
+			}
+			return
+		}
+		log.Printf("recv: %s", message)
+	}
+}
+
+func closeConnection(conn *websocket.Conn, remote_message_chan *chan struct{}) {
 	err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 	if err != nil {
 		log.Fatalln("Failed to gracefully close WebSocket!", err)
@@ -154,7 +166,7 @@ func closeConnection(conn *websocket.Conn, done *chan struct{}) {
 	// hold off on returning out of the loop until the websocket is closed
 	// gracefully or we receive a terminate interrupt from the OS
 	select {
-	case <-*done:
+	case <-*remote_message_chan:
 	case <-time.After(time.Second):
 	}
 }
