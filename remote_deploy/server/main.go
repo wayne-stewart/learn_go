@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 	"golang.org/x/sys/windows/svc"
 
 	"github.com/gorilla/websocket"
+
+	"remote_deploy/common"
 )
 
 var upgrader = websocket.Upgrader{}
@@ -85,4 +88,14 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+func copy_deploy(compress_buffer []byte, destinations []string) error {
+	for i := 0; i < len(destinations); i++ {
+		reader := bytes.NewReader(compress_buffer)
+		if err := common.Uncompress(reader, destinations[i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -66,16 +66,7 @@ func main() {
 PROGRESS_END:
 
 	compress_buffer := bytes.NewBuffer(make([]byte, 0, 1024*1024))
-	common.Compress(*src, compress_buffer)
-	fmt.Printf("buffer length: %s\n", common.FormatBytes(compress_buffer.Len()))
-	fmt.Printf("buffer capacity: %s\n", common.FormatBytes(compress_buffer.Cap()))
-
-	for i := 0; i < len(destinations); i++ {
-		reader := bytes.NewReader(compress_buffer.Bytes())
-		if err := common.Uncompress(reader, destinations[i]); err != nil {
-			log.Fatalln("Failed to decompress!", err)
-		}
-	}
+	_, err := common.Compress(*src, compress_buffer, common.Progress)
 
 	return
 

@@ -30,6 +30,12 @@ func FormatBytes(x int) string {
 	}
 }
 
+func Progress(count int, total int, message string, pad_right int) {
+	fmt.Printf("\r[%d/%d] %.2f%% %-*s", count, total, 100.0*float64(count)/float64(total), pad_right, message)
+}
+
+type ProgressFunc func(count int, total int, message string, pad_right int)
+
 func EnsureDir(path string) error {
 	if _, err := os.Stat(path); err != nil {
 		if err := os.MkdirAll(path, 0755); err != nil {
@@ -39,11 +45,26 @@ func EnsureDir(path string) error {
 	return nil
 }
 
-func Compress(src string, dst io.Writer) error {
+func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count int, err error) {
 	zip_writer := gzip.NewWriter(dst)
 	tar_writer := tar.NewWriter(zip_writer)
+	total := 0
+	count := 0
+	pad_right := 0
 
+	fmt.Println("counting files in", src)
 	filepath.Walk(src, func(file string, info os.FileInfo, err error) error {
+		total++
+		l := len(filepath.ToSlash(file[len(src):]))
+		if l > pad_right {
+			pad_right = l
+		}
+		return nil
+	})
+
+	fmt.Println("compressing...")
+	if err := filepath.Walk(src, func(file string, info os.FileInfo, err error) error {
+		count++
 		if err != nil {
 			return err
 		}
@@ -56,7 +77,7 @@ func Compress(src string, dst io.Writer) error {
 		if len(header.Name) == 0 {
 			header.Name = "ROOT"
 		}
-		fmt.Printf("header name: %s\n", header.Name)
+		progress(count, total, header.Name, pad_right)
 
 		if err := tar_writer.WriteHeader(header); err != nil {
 			return err
@@ -73,17 +94,21 @@ func Compress(src string, dst io.Writer) error {
 		}
 
 		return nil
-	})
+	}); err != nil {
+		fmt.Println()
+		return 0, err
+	}
+	fmt.Println()
 
 	if err := tar_writer.Close(); err != nil {
-		return err
+		return 0, err
 	}
 
 	if err := zip_writer.Close(); err != nil {
-		return err
+		return 0, err
 	}
 
-	return nil
+	return count, nil
 }
 
 func Uncompress(src io.Reader, dst string) error {
