@@ -1,8 +1,9 @@
-module remote_file_distribute/client
+module remote_deploy/client
 
 go 1.18
 
-require github.com/gorilla/websocket v1.5.0 // indirect
+require github.com/gorilla/websocket v1.5.0
 
-replace remote_file_distribute/common => ../common
-require remote_file_distribute/common v0.0.0
+replace remote_deploy/common => ../common
+
+require remote_deploy/common v0.0.0

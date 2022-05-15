@@ -13,7 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"remote_file_distribute/common"
+	"remote_deploy/common"
 )
 
 type Destinations []string

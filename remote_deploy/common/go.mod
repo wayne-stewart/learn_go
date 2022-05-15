@@ -1,3 +1,3 @@
-module remote_file_distribute/common
+module remote_deploy/common
 
 go 1.18

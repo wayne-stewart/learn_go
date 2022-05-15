@@ -1,4 +1,4 @@
-module remote_file_distribute/server
+module remote_deploy/server
 
 go 1.18
 
