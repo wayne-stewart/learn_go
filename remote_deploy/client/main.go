@@ -40,6 +40,31 @@ func main() {
 	}
 	validate_dir_exists(*src)
 
+	cancel_interrupt := make(chan os.Signal, 1)
+	signal.Notify(cancel_interrupt, os.Interrupt)
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	count := 0
+	total := 5
+
+	for {
+		select {
+		case <-cancel_interrupt:
+			fmt.Print("\nOperation Cancelled\n")
+			return
+		case <-ticker.C:
+			count++
+			fmt.Printf("\r[%d/%d] discovering files", count, total)
+			if count >= total {
+				fmt.Println()
+				goto PROGRESS_END
+			}
+		}
+	}
+PROGRESS_END:
+
 	compress_buffer := bytes.NewBuffer(make([]byte, 0, 1024*1024))
 	common.Compress(*src, compress_buffer)
 	fmt.Printf("buffer length: %s\n", common.FormatBytes(compress_buffer.Len()))
@@ -53,9 +78,6 @@ func main() {
 	}
 
 	return
-
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
 
 	uri := url.URL{Scheme: "ws", Host: *addr, Path: "/rfd"}
 	c, _, err := websocket.DefaultDialer.Dial(uri.String(), nil)
@@ -79,9 +101,6 @@ func main() {
 			log.Printf("recv: %s", message)
 		}
 	}()
-
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
 
 	// first send the size of the data to be transferred
 	// so that the server can allocate the space needed to store it
