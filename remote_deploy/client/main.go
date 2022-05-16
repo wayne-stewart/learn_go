@@ -36,7 +36,7 @@ func main() {
 	flag.Parse()
 
 	if len(*src) == 0 {
-		fatalError("src is required")
+		fatalError(true, "src is required")
 	}
 	validate_dir_exists(*src)
 
@@ -48,28 +48,8 @@ func main() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
-	/*
-			count := 0
-			total := 5
-
-			for {
-				select {
-				case <-interrupt_chan:
-					fmt.Print("\nOperation Cancelled\n")
-					return
-				case <-ticker.C:
-					count++
-					fmt.Printf("\r[%d/%d] discovering files", count, total)
-					if count >= total {
-						fmt.Println()
-						goto PROGRESS_END
-					}
-				}
-			}
-		PROGRESS_END:
-	*/
 	compress_buffer := bytes.NewBuffer(make([]byte, 0, 1024*1024))
-	compress_count, err := common.Compress(*src, compress_buffer, common.ProgressEach)
+	compress_count, _ := common.Compress(*src, compress_buffer, common.ProgressEach)
 
 	// initialize websocket connection
 	uri := url.URL{Scheme: "ws", Host: *addr, Path: "/rfd"}
@@ -89,26 +69,6 @@ func main() {
 
 	// waits until remote message chan is triggered/closed
 	<-remote_message_chan
-
-	// for {
-	// 	select {
-	// 	case <-progress_done:
-	// 		return
-	// 	// case <-ticker.C:
-	// 	// 	b = !b
-	// 	// 	if b {
-	// 	// 		err = c.WriteMessage(websocket.TextMessage, []byte("PT"))
-	// 	// 	} else {
-	// 	// 		err = c.WriteMessage(websocket.TextMessage, []byte("ST"))
-	// 	// 	}
-	// 	// 	if err != nil {
-	// 	// 		log.Fatalln("Failed to write to WebSocket!", err)
-	// 	// 	}
-	// 	case <-interrupt_chan:
-	// 		closeConnection(websocket_conn, &progress_done)
-	// 		return
-	// 	}
-	// }
 }
 
 func sendMetaData(conn *websocket.Conn, byte_size int, item_count int, destinations Destinations) {
@@ -145,23 +105,51 @@ func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
 
 func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{}) {
 	defer close(*remote_message_chan)
+	progress_padding := 0
+	need_newln := false
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Println("Failed to read from WebSocket!", err)
+				log.Println("\nFailed to read from WebSocket!", err)
 			}
 			return
 		}
-		log.Printf("recv: %s", message)
+		switch {
+		case string(message[0:7]) == "ERROR: ":
+			if need_newln {
+				fmt.Println()
+				need_newln = false
+			}
+			log.Fatalln(string(message[7:]))
+		case string(message[0:10]) == "PROGRESS: ":
+			need_newln = true
+			x, _ := fmt.Printf("\r%-*s", progress_padding, string(message[10:]))
+			if x > progress_padding {
+				progress_padding = x
+			}
+		case string(message[0:11]) == "PROG DONE: ":
+			need_newln = false
+			x, _ := fmt.Printf("\r%-*s\n", progress_padding, "[100%] "+string(message[11:]))
+			if x > progress_padding {
+				progress_padding = x
+			}
+		case string(message) == "DONE":
+			if need_newln {
+				fmt.Println()
+				need_newln = false
+			}
+			fmt.Println("deploy complete")
+			closeConnection(conn, remote_message_chan)
+		}
 	}
 }
 
 func closeConnection(conn *websocket.Conn, remote_message_chan *chan struct{}) {
-	err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	if err != nil {
-		log.Fatalln("Failed to gracefully close WebSocket!", err)
-	}
+	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+	// if err != nil {
+	// 	log.Fatalln("Failed to gracefully close WebSocket!", err)
+	// }
 
 	// hold off on returning out of the loop until the websocket is closed
 	// gracefully or we receive a terminate interrupt from the OS
@@ -172,17 +160,19 @@ func closeConnection(conn *websocket.Conn, remote_message_chan *chan struct{}) {
 }
 
 func validationError(s string, arg ...any) {
-	fatalError(s, arg...)
-	flag.Usage()
+	fatalError(true, s, arg...)
 }
 
-func fatalError(s string, arg ...any) {
+func fatalError(show_usage bool, s string, arg ...any) {
 	fmt.Print("ERROR: ")
 	if len(arg) > 0 {
 		fmt.Printf(s, arg...)
 		fmt.Println()
 	} else {
 		fmt.Println(s)
+	}
+	if show_usage {
+		flag.Usage()
 	}
 	os.Exit(1)
 }

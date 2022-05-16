@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"golang.org/x/sys/windows/svc"
 
@@ -50,6 +53,8 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 	defer c.Close()
 
 	buffer := bytes.NewBuffer(make([]byte, 0, 10*1024*1024))
+	data_size := 0
+	destinations := make([]string, 0)
 
 	for {
 		mt, message, err := c.ReadMessage()
@@ -60,25 +65,24 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		/* the command will be the first 2 characters of the message */
-		command := string(message[0:2])
-
 		switch {
 		case mt == websocket.TextMessage && string(message[0:5]) == common.META_BAR:
 			log.Println("meta data received")
-			// size := binary.BigEndian.Uint64(message[2:])
-			// data = make([]byte, size)
-			// err = c.WriteMessage(mt, []byte(fmt.Sprintf("SZ: %d", len(data))))
+			meta_strings := strings.Split(string(message[5:]), "|")
+			data_size, _ = strconv.Atoi(meta_strings[0])
+			destinations = strings.Split(meta_strings[2], ",")
 		case mt == websocket.TextMessage && string(message) == common.DATA_DONE:
 			log.Println("data received")
+			if buffer.Len() != data_size {
+				_ = c.WriteMessage(websocket.TextMessage, []byte("ERROR: inavlid data size"))
+			}
+			if err := decompress_deploy(c, buffer.Bytes(), destinations); err != nil {
+				_ = c.WriteMessage(websocket.TextMessage, []byte("ERROR: "+err.Error()))
+			}
 		case mt == websocket.BinaryMessage:
 			buffer.Write(message)
-			//log.Println("data received")
-			// offset := binary.BigEndian.Uint64(message[2:10])
-			// size := binary.BigEndian.Uint32(message[10:14])
-			// err = c.WriteMessage(mt, []byte(fmt.Sprintf("CH: %d, %d", offset, size)))
 		default:
-			_ = c.WriteMessage(mt, []byte("UNKNOWN COMMAND: "+command))
+			_ = c.WriteMessage(mt, []byte("ERROR: unknown command"))
 			return
 		}
 
@@ -89,12 +93,24 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func decompress_deploy(compress_buffer []byte, destinations []string) error {
-	for i := 0; i < len(destinations); i++ {
-		reader := bytes.NewReader(compress_buffer)
-		if err := common.Uncompress(reader, destinations[i]); err != nil {
-			return err
+func decompress_deploy(conn *websocket.Conn, compress_buffer []byte, destinations []string) error {
+	ts := time.Now()
+	send_progress := func(count int, total_items int, message string, pad_right int) {
+		// only send progress updates every 20ms
+		tdiff := time.Now().Sub(ts)
+		if tdiff > 20*time.Millisecond {
+			ts = time.Now()
+			_ = conn.WriteMessage(websocket.TextMessage,
+				[]byte("PROGRESS: "+common.ProgressEachValue(count, total_items, message, pad_right)))
 		}
 	}
+	for i := 0; i < len(destinations); i++ {
+		reader := bytes.NewReader(compress_buffer)
+		if err := common.Uncompress(reader, destinations[i], send_progress); err != nil {
+			return err
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte("PROG DONE: "+destinations[i]))
+	}
+	_ = conn.WriteMessage(websocket.TextMessage, []byte("DONE"))
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 )
 
 const DATA_DONE = "DATA_DONE"
@@ -38,7 +39,11 @@ func ProgressBytes(count int, total int, message string, pad_right int) {
 }
 
 func ProgressEach(count int, total int, message string, pad_right int) {
-	fmt.Printf("\r[%.0f%%] %d/%d %-*s", 100.0*float64(count)/float64(total), count, total, pad_right, message)
+	fmt.Printf("\r%s", ProgressEachValue(count, total, message, pad_right))
+}
+
+func ProgressEachValue(count int, total int, message string, pad_right int) string {
+	return fmt.Sprintf("[%.0f%%] %d/%d %-*s", 100.0*float64(count)/float64(total), count, total, pad_right, message)
 }
 
 type ProgressFunc func(count int, total int, message string, pad_right int)
@@ -59,7 +64,7 @@ func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count 
 	count := 0
 	pad_right := 0
 
-	fmt.Println("counting files in", src)
+	fmt.Println("preparing:", src)
 	l1 := len("compressing: ")
 	filepath.Walk(src, func(file string, info os.FileInfo, err error) error {
 		total++
@@ -81,7 +86,7 @@ func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count 
 
 		header.Name = filepath.ToSlash(file[len(src):])
 		if len(header.Name) == 0 {
-			header.Name = "ROOT"
+			header.Name = fmt.Sprintf("ROOT%d", total)
 		}
 		progress(count, total, "compressing: "+header.Name, pad_right)
 		count++
@@ -119,7 +124,7 @@ func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count 
 	return count, nil
 }
 
-func Uncompress(src io.Reader, dst string) error {
+func Uncompress(src io.Reader, dst string, progress ProgressFunc) error {
 	zip_reader, err := gzip.NewReader(src)
 	if err != nil {
 		return err
@@ -128,14 +133,17 @@ func Uncompress(src io.Reader, dst string) error {
 	tar_reader := tar.NewReader(zip_reader)
 
 	header, err := tar_reader.Next()
-	if err != nil || header.Name != "ROOT" {
+	if err != nil || header.Name[0:4] != "ROOT" {
 		return errors.New("invalid tar.gz format for this appliation, ROOT not found")
 	}
+	total_items, _ := strconv.Atoi(header.Name[4:])
 
 	err = EnsureDir(dst)
 	if err != nil {
 		return err
 	}
+
+	count := 0
 
 	for {
 		header, err := tar_reader.Next()
@@ -147,6 +155,8 @@ func Uncompress(src io.Reader, dst string) error {
 		}
 
 		target := filepath.Join(dst, header.Name)
+		count++
+		progress(count, total_items, target, 0)
 
 		switch header.Typeflag {
 		case tar.TypeDir:

@@ -1,4 +1,4 @@
-module remote_deploy/server
+module remote_deploy/server/v0.1.0
 
 go 1.18
 
@@ -9,4 +9,4 @@ require (
 
 replace remote_deploy/common => ../common
 
-require remote_deploy/common v0.0.0
+require remote_deploy/common v0.1.0
