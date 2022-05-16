@@ -130,7 +130,7 @@ func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{})
 			}
 		case string(message[0:11]) == "PROG DONE: ":
 			need_newln = false
-			x, _ := fmt.Printf("\r%-*s\n", progress_padding, "[100%] "+string(message[11:]))
+			x, _ := fmt.Printf("\r%-*s\n", progress_padding, "[100%] "+strings.TrimSpace(string(message[11:])))
 			if x > progress_padding {
 				progress_padding = x
 			}

@@ -96,9 +96,9 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 func decompress_deploy(conn *websocket.Conn, compress_buffer []byte, destinations []string) error {
 	ts := time.Now()
 	send_progress := func(count int, total_items int, message string, pad_right int) {
-		// only send progress updates every 20ms
-		tdiff := time.Now().Sub(ts)
-		if tdiff > 20*time.Millisecond {
+		// only send progress updates every 100ms
+		since := time.Since(ts)
+		if since > 200*time.Millisecond {
 			ts = time.Now()
 			_ = conn.WriteMessage(websocket.TextMessage,
 				[]byte("PROGRESS: "+common.ProgressEachValue(count, total_items, message, pad_right)))
