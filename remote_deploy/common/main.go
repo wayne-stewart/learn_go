@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 const DATA_DONE = "DATA_DONE"
@@ -34,19 +35,27 @@ func FormatBytes(x int) string {
 	}
 }
 
-func ProgressBytes(count int, total int, message string, pad_right int) {
-	fmt.Printf("\r[%.0f%%] %s %-*s", 100.0*float64(count)/float64(total), FormatBytes(count), pad_right, message)
+func ProgressBytes(count int, total int, message string, previously_written int) int {
+	if previously_written > 0 {
+		fmt.Print(strings.Repeat("\b", previously_written))
+	}
+	n, _ := fmt.Printf("[%.0f%%] %s %s", 100.0*float64(count)/float64(total), FormatBytes(count), message)
+	return n
 }
 
-func ProgressEach(count int, total int, message string, pad_right int) {
-	fmt.Printf("\r%s", ProgressEachValue(count, total, message, pad_right))
+func ProgressEach(count int, total int, message string, previously_written int) int {
+	if previously_written > 0 {
+		fmt.Print(strings.Repeat("\b", previously_written))
+	}
+	n, _ := fmt.Printf("%s", ProgressEachValue(count, total, message))
+	return n
 }
 
-func ProgressEachValue(count int, total int, message string, pad_right int) string {
-	return fmt.Sprintf("[%.0f%%] %d/%d %-*s", 100.0*float64(count)/float64(total), count, total, pad_right, message)
+func ProgressEachValue(count int, total int, message string) string {
+	return fmt.Sprintf("[%.0f%%] %d/%d %s", 100.0*float64(count)/float64(total), count, total, message)
 }
 
-type ProgressFunc func(count int, total int, message string, pad_right int)
+type ProgressFunc func(count int, total int, message string, previously_written int) int
 
 func EnsureDir(path string) error {
 	if _, err := os.Stat(path); err != nil {
@@ -88,7 +97,7 @@ func Compress(src string, dst io.Writer, progress ProgressFunc) (compress_count 
 		if len(header.Name) == 0 {
 			header.Name = fmt.Sprintf("ROOT%d", total)
 		}
-		progress(count, total, "compressing: "+header.Name, pad_right)
+		progress(count, total, "compressing: "+filepath.Dir(header.Name), pad_right)
 		count++
 
 		if err := tar_writer.WriteHeader(header); err != nil {
@@ -156,7 +165,7 @@ func Uncompress(src io.Reader, dst string, progress ProgressFunc) error {
 
 		target := filepath.Join(dst, header.Name)
 		count++
-		progress(count, total_items, target, 0)
+		progress(count, total_items, filepath.Dir(target), 0)
 
 		switch header.Typeflag {
 		case tar.TypeDir:

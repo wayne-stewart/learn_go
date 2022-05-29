@@ -85,8 +85,14 @@ func sendMetaData(conn *websocket.Conn, byte_size int, item_count int, destinati
 func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
 	data := buffer.Bytes()
 	chunk_size := 4096
+	chars_written := 0
+	ts := time.Now()
 	for low := 0; low < len(data); {
-		common.ProgressBytes(low, len(data), "sending data", 20)
+		since := time.Since(ts)
+		if since > 200*time.Millisecond {
+			ts = time.Now()
+			chars_written = common.ProgressBytes(low, len(data), "sending data", chars_written)
+		}
 		high := low + chunk_size
 		if high > len(data) {
 			high = len(data)
@@ -98,15 +104,13 @@ func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
 		}
 		low = high
 	}
-	common.ProgressBytes(len(data), len(data), "all data sent", 0)
-	fmt.Println()
+	common.ProgressBytes(len(data), len(data), "all data sent\n", chars_written)
 	conn.WriteMessage(websocket.TextMessage, []byte(common.DATA_DONE))
 }
 
 func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{}) {
 	defer close(*remote_message_chan)
-	progress_padding := 0
-	need_newln := false
+	chars_written := 0
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -117,28 +121,19 @@ func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{})
 		}
 		switch {
 		case string(message[0:7]) == "ERROR: ":
-			if need_newln {
-				fmt.Println()
-				need_newln = false
-			}
 			log.Fatalln(string(message[7:]))
 		case string(message[0:10]) == "PROGRESS: ":
-			need_newln = true
-			x, _ := fmt.Printf("\r%-*s", progress_padding, string(message[10:]))
-			if x > progress_padding {
-				progress_padding = x
+			if chars_written > 0 {
+				fmt.Print(strings.Repeat("\b", chars_written))
 			}
+			chars_written, _ = fmt.Print(string(message[10:]))
 		case string(message[0:11]) == "PROG DONE: ":
-			need_newln = false
-			x, _ := fmt.Printf("\r%-*s\n", progress_padding, "[100%] "+strings.TrimSpace(string(message[11:])))
-			if x > progress_padding {
-				progress_padding = x
+			if chars_written > 0 {
+				fmt.Print(strings.Repeat("\b", chars_written))
 			}
+			fmt.Printf("[100%%] %s\n", strings.TrimSpace(string(message[11:])))
+			chars_written = 0
 		case string(message) == "DONE":
-			if need_newln {
-				fmt.Println()
-				need_newln = false
-			}
 			fmt.Println("deploy complete")
 			closeConnection(conn, remote_message_chan)
 		}
