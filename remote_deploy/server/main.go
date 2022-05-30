@@ -67,12 +67,12 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 
 		switch {
 		case mt == websocket.TextMessage && string(message[0:5]) == common.META_BAR:
-			log.Println("meta data received")
+			//log.Println("meta data received")
 			meta_strings := strings.Split(string(message[5:]), "|")
 			data_size, _ = strconv.Atoi(meta_strings[0])
 			destinations = strings.Split(meta_strings[2], ",")
 		case mt == websocket.TextMessage && string(message) == common.DATA_DONE:
-			log.Println("data received")
+			//log.Println("data received")
 			if buffer.Len() != data_size {
 				_ = c.WriteMessage(websocket.TextMessage, []byte("ERROR: inavlid data size"))
 			}
@@ -94,20 +94,15 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 }
 
 func decompress_deploy(conn *websocket.Conn, compress_buffer []byte, destinations []string) error {
-	ts := time.Now()
-	send_progress := func(count int, total_items int, message string, previously_written int) int {
-		// only send progress updates every 100ms
-		since := time.Since(ts)
-		if since > 200*time.Millisecond {
-			ts = time.Now()
-			_ = conn.WriteMessage(websocket.TextMessage,
-				[]byte("PROGRESS: "+common.ProgressEachValue(count, total_items, message)))
-		}
-		return 0
-	}
+	progress := common.BeginProgress(200*time.Millisecond, func(count int, total int, message string) string {
+		m := "PROGRESS: " + common.ProgressEachValue(count, total, message)
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(m))
+		return m
+	})
+	progress.DisablePrint()
 	for i := 0; i < len(destinations); i++ {
 		reader := bytes.NewReader(compress_buffer)
-		if err := common.Uncompress(reader, destinations[i], send_progress); err != nil {
+		if err := common.Uncompress(reader, destinations[i], progress); err != nil {
 			return err
 		}
 		_ = conn.WriteMessage(websocket.TextMessage, []byte("PROG DONE: "+destinations[i]))

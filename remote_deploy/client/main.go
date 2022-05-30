@@ -28,6 +28,7 @@ func (i *Destinations) Set(value string) error {
 }
 
 var destinations Destinations
+var progress_rate_limit = 200 * time.Millisecond
 
 func main() {
 	addr := flag.String("addr", "", "Address of remote server: -addr <domain or ip>:port")
@@ -48,8 +49,10 @@ func main() {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	fmt.Println("compressing:", *src)
 	compress_buffer := bytes.NewBuffer(make([]byte, 0, 1024*1024))
-	compress_count, _ := common.Compress(*src, compress_buffer, common.ProgressEach)
+	compress_progress := common.BeginProgress(progress_rate_limit, common.ProgressEachValue)
+	compress_count, _ := common.Compress(*src, compress_buffer, compress_progress)
 
 	// initialize websocket connection
 	uri := url.URL{Scheme: "ws", Host: *addr, Path: "/rfd"}
@@ -85,14 +88,9 @@ func sendMetaData(conn *websocket.Conn, byte_size int, item_count int, destinati
 func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
 	data := buffer.Bytes()
 	chunk_size := 4096
-	chars_written := 0
-	ts := time.Now()
+	progress := common.BeginProgress(progress_rate_limit, common.ProgressBytesValue)
 	for low := 0; low < len(data); {
-		since := time.Since(ts)
-		if since > 200*time.Millisecond {
-			ts = time.Now()
-			chars_written = common.ProgressBytes(low, len(data), "sending data", chars_written)
-		}
+		progress.Write(low, len(data), "sending data")
 		high := low + chunk_size
 		if high > len(data) {
 			high = len(data)
@@ -104,13 +102,13 @@ func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
 		}
 		low = high
 	}
-	common.ProgressBytes(len(data), len(data), "all data sent\n", chars_written)
+	progress.Writeln(len(data), len(data), "all data sent")
 	conn.WriteMessage(websocket.TextMessage, []byte(common.DATA_DONE))
 }
 
 func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{}) {
 	defer close(*remote_message_chan)
-	chars_written := 0
+	progress := common.BeginProgress(progress_rate_limit, common.ProgressMessageValue)
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -123,18 +121,11 @@ func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{})
 		case string(message[0:7]) == "ERROR: ":
 			log.Fatalln(string(message[7:]))
 		case string(message[0:10]) == "PROGRESS: ":
-			if chars_written > 0 {
-				fmt.Print(strings.Repeat("\b", chars_written))
-			}
-			chars_written, _ = fmt.Print(string(message[10:]))
+			progress.Write(1, 1, string(message[10:]))
 		case string(message[0:11]) == "PROG DONE: ":
-			if chars_written > 0 {
-				fmt.Print(strings.Repeat("\b", chars_written))
-			}
-			fmt.Printf("[100%%] %s\n", strings.TrimSpace(string(message[11:])))
-			chars_written = 0
+			progress.Writeln(1, 1, "deploy complete: "+strings.TrimSpace(string(message[11:])))
 		case string(message) == "DONE":
-			fmt.Println("deploy complete")
+			//fmt.Println("deploy complete")
 			closeConnection(conn, remote_message_chan)
 		}
 	}
