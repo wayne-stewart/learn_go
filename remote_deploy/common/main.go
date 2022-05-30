@@ -109,9 +109,9 @@ func (info *ProgressInfo) DisablePrint() {
 	info.print = false
 }
 
-func BeginProgress(rate_limit time.Duration, progress ProgressFunc) *ProgressInfo {
+func BeginProgress(progress ProgressFunc) *ProgressInfo {
 	var info = new(ProgressInfo)
-	info.rateLimit = rate_limit
+	info.rateLimit = 100 * time.Millisecond
 	info.timeStamp = time.Now()
 	info.previouslyWritten = 0
 	info.print = true

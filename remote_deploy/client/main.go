@@ -28,7 +28,6 @@ func (i *Destinations) Set(value string) error {
 }
 
 var destinations Destinations
-var progress_rate_limit = 200 * time.Millisecond
 
 func main() {
 	addr := flag.String("addr", "", "Address of remote server: -addr <domain or ip>:port")
@@ -46,12 +45,14 @@ func main() {
 	interrupt_chan := make(chan os.Signal, 1)
 	signal.Notify(interrupt_chan, os.Interrupt)
 
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	go func() {
+		<-interrupt_chan
+		os.Exit(0)
+	}()
 
 	fmt.Println("compressing:", *src)
 	compress_buffer := bytes.NewBuffer(make([]byte, 0, 1024*1024))
-	compress_progress := common.BeginProgress(progress_rate_limit, common.ProgressEachValue)
+	compress_progress := common.BeginProgress(common.ProgressEachValue)
 	compress_count, _ := common.Compress(*src, compress_buffer, compress_progress)
 
 	// initialize websocket connection
@@ -88,7 +89,7 @@ func sendMetaData(conn *websocket.Conn, byte_size int, item_count int, destinati
 func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
 	data := buffer.Bytes()
 	chunk_size := 4096
-	progress := common.BeginProgress(progress_rate_limit, common.ProgressBytesValue)
+	progress := common.BeginProgress(common.ProgressBytesValue)
 	for low := 0; low < len(data); {
 		progress.Write(low, len(data), "sending data")
 		high := low + chunk_size
@@ -108,7 +109,7 @@ func sendData(conn *websocket.Conn, buffer *bytes.Buffer) {
 
 func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{}) {
 	defer close(*remote_message_chan)
-	progress := common.BeginProgress(progress_rate_limit, common.ProgressMessageValue)
+	progress := common.BeginProgress(common.ProgressMessageValue)
 	for {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
@@ -123,7 +124,7 @@ func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{})
 		case string(message[0:10]) == "PROGRESS: ":
 			progress.Write(1, 1, string(message[10:]))
 		case string(message[0:11]) == "PROG DONE: ":
-			progress.Writeln(1, 1, "deploy complete: "+strings.TrimSpace(string(message[11:])))
+			progress.Writeln(1, 1, "[100%] "+strings.TrimSpace(string(message[11:])))
 		case string(message) == "DONE":
 			//fmt.Println("deploy complete")
 			closeConnection(conn, remote_message_chan)

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"golang.org/x/sys/windows/svc"
 
@@ -94,7 +93,7 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 }
 
 func decompress_deploy(conn *websocket.Conn, compress_buffer []byte, destinations []string) error {
-	progress := common.BeginProgress(200*time.Millisecond, func(count int, total int, message string) string {
+	progress := common.BeginProgress(func(count int, total int, message string) string {
 		m := "PROGRESS: " + common.ProgressEachValue(count, total, message)
 		_ = conn.WriteMessage(websocket.TextMessage, []byte(m))
 		return m
