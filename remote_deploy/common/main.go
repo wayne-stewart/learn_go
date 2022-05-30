@@ -36,22 +36,6 @@ func FormatBytes(x int) string {
 	}
 }
 
-// func ProgressBytes(count int, total int, message string, previously_written int) int {
-// 	if previously_written > 0 {
-// 		fmt.Print(strings.Repeat("\b", previously_written))
-// 	}
-// 	n, _ := fmt.Printf("[%.0f%%] %s %s", 100.0*float64(count)/float64(total), FormatBytes(count), message)
-// 	return n
-// }
-
-// func ProgressEach(count int, total int, message string, previously_written int) int {
-// 	if previously_written > 0 {
-// 		fmt.Print(strings.Repeat("\b", previously_written))
-// 	}
-// 	n, _ := fmt.Printf("%s", ProgressEachValue(count, total, message))
-// 	return n
-// }
-
 func ProgressBytesValue(count int, total int, message string) string {
 	return fmt.Sprintf("[%.0f%%] %s %s", 100.0*float64(count)/float64(total), FormatBytes(count), message)
 }
@@ -181,14 +165,6 @@ func Compress(src string, dst io.Writer, progress *ProgressInfo) (compress_count
 	}
 
 	progress.Writeln(total, total, "compression complete")
-
-	// if err := tar_writer.Close(); err != nil {
-	// 	return 0, err
-	// }
-
-	// if err := zip_writer.Close(); err != nil {
-	// 	return 0, err
-	// }
 
 	return count, nil
 }

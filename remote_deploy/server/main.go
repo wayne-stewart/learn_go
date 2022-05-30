@@ -2,51 +2,76 @@ package main
 
 import (
 	"bytes"
-	"flag"
 	"fmt"
-	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 
-	"golang.org/x/sys/windows/svc"
+	"golang.org/x/sys/windows/svc/debug"
 
 	"github.com/gorilla/websocket"
 
 	"remote_deploy/common"
+
+	"remote_deploy/winsvc"
 )
 
 var upgrader = websocket.Upgrader{}
+var log debug.Log
+var deploy_agent DeployAgentService
+
+const SERVICE_NAME = "Deploy Agent"
 
 func main() {
 
-	listen_addr := flag.String("listen_addr", "localhost:8081", "http service address")
-	flag.Parse()
+	deploy_agent = DeployAgentService{listen_addr: "localhost:8081"}
 
-	is_service, err := svc.IsWindowsService()
-	if err != nil {
-		log.Fatalf("failed to determine if we are running in user interactive: %v", err)
-	}
+	service_manager := winsvc.ServiceManager{Name: SERVICE_NAME, Desc: SERVICE_NAME, Service: &deploy_agent}
 
-	if is_service {
-		log.Println("running as a service.")
+	if len(os.Args) > 1 {
+		service_manager.Command(os.Args[1])
 	} else {
-		log.Println("running as user interactive.")
+		service_manager.Run()
 	}
+}
 
-	http.HandleFunc("/rfd", handle_rfd)
+type DeployAgentService struct {
+	listen_addr string
+	server      http.Server
+}
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+func (service *DeployAgentService) Start(elog debug.Log) {
+
+	log = elog
+
+	srvmux := http.NewServeMux()
+
+	srvmux.HandleFunc("/rfd", handle_rfd)
+
+	srvmux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "Hello, friend. Who are you?")
 	})
 
-	log.Fatal(http.ListenAndServe(*listen_addr, nil))
+	service.server = http.Server{
+		Addr:    service.listen_addr,
+		Handler: srvmux,
+	}
+
+	err := service.server.ListenAndServe()
+	if err != nil && err != http.ErrServerClosed {
+		log.Error(1, fmt.Sprintf("%s: failed to listen on %s, error: %v", SERVICE_NAME, service.listen_addr, err))
+	}
+}
+
+func (service *DeployAgentService) Stop() {
+	service.server.Close()
 }
 
 func handle_rfd(w http.ResponseWriter, r *http.Request) {
 	c, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Println("Failed to upgrade to a WebSocket!", err)
+		log.Error(1, fmt.Sprintf("%s: failed to upgrade to a WebSocket! %v", SERVICE_NAME, err))
 		return
 	}
 	defer c.Close()
@@ -59,7 +84,7 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 		mt, message, err := c.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
-				log.Println("Failed to read from WebSocket!", err)
+				log.Error(1, fmt.Sprintf("%s: failed to read from WebSocket! %v", SERVICE_NAME, err))
 			}
 			return
 		}
@@ -86,7 +111,7 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
-			log.Println("Failed to write to WebSocket!", err)
+			log.Error(1, fmt.Sprintf("%s: failed to write to WebSocket! %v", SERVICE_NAME, err))
 			return
 		}
 	}
