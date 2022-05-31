@@ -126,7 +126,6 @@ func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{})
 		case string(message[0:11]) == "PROG DONE: ":
 			progress.Writeln(1, 1, "[100%] "+strings.TrimSpace(string(message[11:])))
 		case string(message) == "DONE":
-			//fmt.Println("deploy complete")
 			closeConnection(conn, remote_message_chan)
 		}
 	}
@@ -134,9 +133,6 @@ func remoteMessageLoop(conn *websocket.Conn, remote_message_chan *chan struct{})
 
 func closeConnection(conn *websocket.Conn, remote_message_chan *chan struct{}) {
 	conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
-	// if err != nil {
-	// 	log.Fatalln("Failed to gracefully close WebSocket!", err)
-	// }
 
 	// hold off on returning out of the loop until the websocket is closed
 	// gracefully or we receive a terminate interrupt from the OS

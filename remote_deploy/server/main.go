@@ -91,12 +91,10 @@ func handle_rfd(w http.ResponseWriter, r *http.Request) {
 
 		switch {
 		case mt == websocket.TextMessage && string(message[0:5]) == common.META_BAR:
-			//log.Println("meta data received")
 			meta_strings := strings.Split(string(message[5:]), "|")
 			data_size, _ = strconv.Atoi(meta_strings[0])
 			destinations = strings.Split(meta_strings[2], ",")
 		case mt == websocket.TextMessage && string(message) == common.DATA_DONE:
-			//log.Println("data received")
 			if buffer.Len() != data_size {
 				_ = c.WriteMessage(websocket.TextMessage, []byte("ERROR: inavlid data size"))
 			}

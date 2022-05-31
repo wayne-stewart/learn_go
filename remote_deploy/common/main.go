@@ -126,6 +126,7 @@ func Compress(src string, dst io.Writer, progress *ProgressInfo) (compress_count
 		return nil
 	})
 
+	// now walk all the files to compress them while giving progress
 	err = filepath.Walk(src, func(file string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -204,28 +205,32 @@ func Uncompress(src io.Reader, dst string, progress *ProgressInfo) error {
 		count++
 		progress.Write(count, total_items, filepath.Dir(target))
 
-		switch header.Typeflag {
-		case tar.TypeDir:
-			err = EnsureDir(target)
-			if err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(file, tar_reader); err != nil {
-				file.Close()
-				return err
-			}
-			// defer doesn't work well here in the switch/loop
-			// we want files closed immediately
-			file.Close()
-		}
+		tar_to_target(target, header, tar_reader)
 	}
 
 	progress.Writeln(total_items, total_items, "decompression complete")
 
+	return nil
+}
+
+func tar_to_target(target string, header *tar.Header, tar_reader *tar.Reader) error {
+	var err error
+	switch header.Typeflag {
+	case tar.TypeDir:
+		err = EnsureDir(target)
+		if err != nil {
+			return err
+		}
+	case tar.TypeReg:
+		file, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		_, err = io.Copy(file, tar_reader)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
